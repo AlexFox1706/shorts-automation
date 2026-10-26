@@ -17,7 +17,13 @@ $log = static function (string $m): void { echo '[' . gmdate('H:i:s') . "] $m\n"
 $client = new RunnerClient(new HttpClient(null, 120, 2), $url, $token);
 
 $tick = static function () use ($client, $log): int {
-    $r = $client->get('tick', [], 150);
+    try {
+        $r = $client->get('tick', [], 150);
+    } catch (Throwable $e) {
+        // хостинг занят долгой задачей (например 504 от nginx) - для сборки это не критично
+        $log('tick не ответил: ' . $e->getMessage());
+        return 0;
+    }
     $w = $r['result']['worker']['processed'] ?? 0;
     $log('tick: обработано задач ' . $w . (isset($r['result']['daily']['reason']) && !$r['result']['daily']['created'] ? ', выпуск: ' . $r['result']['daily']['reason'] : ''));
     return (int)$w;
