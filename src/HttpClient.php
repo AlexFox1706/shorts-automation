@@ -105,6 +105,11 @@ final class HttpClient
                 return strlen($line);
             },
         ]);
+        if (getenv('SHORTS_INSECURE_TLS') === '1') {
+            // Только для раннера: у хостинга самоподписанный сертификат. Токен виден при перехвате, зато связь работает.
+            curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+            curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+        }
         if ($body !== null) {
             curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
         }
