@@ -19,19 +19,26 @@ jobs:
     env:
       SHORTS_HOST_URL: ${{ secrets.SHORTS_HOST_URL }}
       SHORTS_TOKEN: ${{ secrets.SHORTS_TOKEN }}
+      # У хостинга самоподписанный сертификат (GitHub писал: curl 60). Уберите эту строку, когда на сайте будет нормальный SSL.
+      SHORTS_INSECURE_TLS: '1'
     steps:
       - uses: actions/checkout@v4
       - name: Пинок хостингу и проверка заданий (без установки программ)
         id: probe
         run: |
           set -e
+          K=""; [ "$SHORTS_INSECURE_TLS" = "1" ] && K="-k"
           for i in 1 2 3 4 5 6; do
-            out=$(curl -sS --max-time 150 -H "X-Shorts-Token: $SHORTS_TOKEN" "$SHORTS_HOST_URL?action=tick" || true)
+            if ! out=$(curl -sS $K --max-time 150 -H "X-Shorts-Token: $SHORTS_TOKEN" "$SHORTS_HOST_URL?action=tick"); then
+              echo "::error::Хостинг недоступен для GitHub (см. ошибку curl выше). Проверьте SHORTS_HOST_URL и SSL-сертификат сайта."; exit 1
+            fi
             echo "$out" | head -c 600; echo
-            n=$(echo "$out" | jq -r '.result.worker.processed // 0' 2>/dev/null || echo 0)
+            echo "$out" | jq -e . >/dev/null 2>&1 || { echo "::error::Хостинг ответил не JSON: неверный SHORTS_HOST_URL или SHORTS_TOKEN."; exit 1; }
+            n=$(echo "$out" | jq -r '.result.worker.processed // 0')
             [ "$n" -gt 0 ] || break
           done
-          job=$(curl -sS --max-time 60 -H "X-Shorts-Token: $SHORTS_TOKEN" "$SHORTS_HOST_URL?action=render_peek" | jq -r 'if .job == true then "yes" else "no" end' 2>/dev/null || echo no)
+          job=$(curl -sS $K --max-time 60 -H "X-Shorts-Token: $SHORTS_TOKEN" "$SHORTS_HOST_URL?action=render_peek" | jq -r 'if .job == true then "yes" else "no" end' 2>/dev/null || echo no)
+          echo "render_peek: has_job=$job"
           echo "has_job=$job" >> "$GITHUB_OUTPUT"
       - name: Установка PHP и FFmpeg (только если есть задание)
         if: steps.probe.outputs.has_job == 'yes'
