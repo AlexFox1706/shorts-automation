@@ -1,0 +1,41 @@
+name: shorts-runner
+
+# Что делает: раз в 15 минут пинает хостинг (создать выпуск, обработать очередь, прочитать команды Telegram)
+# и, если есть готовое задание, собирает видео FFmpeg и отправляет его обратно на хостинг.
+# Для ПРИВАТНОГО репозитория бесплатных минут ограниченное количество: поставьте cron реже, например '7 * * * *'.
+on:
+  schedule:
+    - cron: '*/15 * * * *'
+  workflow_dispatch:
+
+concurrency:
+  group: shorts-runner
+  cancel-in-progress: false
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      SHORTS_HOST_URL: ${{ secrets.SHORTS_HOST_URL }}
+      SHORTS_TOKEN: ${{ secrets.SHORTS_TOKEN }}
+    steps:
+      - uses: actions/checkout@v4
+      - name: Пинок хостингу и проверка заданий (без установки программ)
+        id: probe
+        run: |
+          set -e
+          for i in 1 2 3 4 5 6; do
+            out=$(curl -sS --max-time 150 -H "X-Shorts-Token: $SHORTS_TOKEN" "$SHORTS_HOST_URL?action=tick" || true)
+            echo "$out" | head -c 600; echo
+            n=$(echo "$out" | jq -r '.result.worker.processed // 0' 2>/dev/null || echo 0)
+            [ "$n" -gt 0 ] || break
+          done
+          job=$(curl -sS --max-time 60 -H "X-Shorts-Token: $SHORTS_TOKEN" "$SHORTS_HOST_URL?action=render_peek" | jq -r 'if .job == true then "yes" else "no" end' 2>/dev/null || echo no)
+          echo "has_job=$job" >> "$GITHUB_OUTPUT"
+      - name: Установка PHP и FFmpeg (только если есть задание)
+        if: steps.probe.outputs.has_job == 'yes'
+        run: sudo apt-get update -qq && sudo apt-get install -y -qq php-cli php-curl php-mbstring ffmpeg fonts-dejavu-core
+      - name: Сборка видео
+        if: steps.probe.outputs.has_job == 'yes'
+        run: php runner/run.php
