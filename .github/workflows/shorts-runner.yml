@@ -29,15 +29,20 @@ jobs:
           set -e
           K=""; [ "$SHORTS_INSECURE_TLS" = "1" ] && K="-k"
           for i in 1 2 3 4 5 6; do
+            # tick - это "пинок" хостингу. Если хостинг занят долгой задачей, nginx может ответить 504: это не страшно, идём дальше.
             if ! out=$(curl -sS $K --max-time 150 -H "X-Shorts-Token: $SHORTS_TOKEN" "$SHORTS_HOST_URL?action=tick"); then
-              echo "::error::Хостинг недоступен для GitHub (см. ошибку curl выше). Проверьте SHORTS_HOST_URL и SSL-сертификат сайта."; exit 1
+              echo "::warning::tick: нет ответа от хостинга (см. ошибку curl выше)"; break
             fi
             echo "$out" | head -c 600; echo
-            echo "$out" | jq -e . >/dev/null 2>&1 || { echo "::error::Хостинг ответил не JSON: неверный SHORTS_HOST_URL или SHORTS_TOKEN."; exit 1; }
+            echo "$out" | jq -e . >/dev/null 2>&1 || { echo "::warning::tick ответил не JSON (хостинг занят или 504). Продолжаю."; break; }
             n=$(echo "$out" | jq -r '.result.worker.processed // 0')
             [ "$n" -gt 0 ] || break
           done
-          job=$(curl -sS $K --max-time 60 -H "X-Shorts-Token: $SHORTS_TOKEN" "$SHORTS_HOST_URL?action=render_peek" | jq -r 'if .job == true then "yes" else "no" end' 2>/dev/null || echo no)
+          # А вот без render_peek работать нельзя: ошибка тут - неверный адрес/токен или недоступен хостинг.
+          peek=$(curl -sS $K --max-time 90 -H "X-Shorts-Token: $SHORTS_TOKEN" "$SHORTS_HOST_URL?action=render_peek") || { echo "::error::Хостинг недоступен для GitHub (см. ошибку curl выше)"; exit 1; }
+          echo "render_peek ответ: $(echo "$peek" | head -c 300)"
+          echo "$peek" | jq -e . >/dev/null 2>&1 || { echo "::error::render_peek ответил не JSON: неверный SHORTS_HOST_URL/SHORTS_TOKEN или хостинг занят (504). Запустите ещё раз."; exit 1; }
+          job=$(echo "$peek" | jq -r 'if .job == true then "yes" else "no" end')
           echo "render_peek: has_job=$job"
           echo "has_job=$job" >> "$GITHUB_OUTPUT"
       - name: Установка PHP и FFmpeg (только если есть задание)
