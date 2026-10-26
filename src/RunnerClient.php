@@ -35,7 +35,7 @@ final class RunnerClient
     /** Файл с самого хостинга (звук, файл библиотеки). */
     public function fetchHost(string $action, array $q, string $dest): void
     {
-        $this->downloadTo($this->url($action, $q), $dest, $this->headers());
+        $this->downloadTo($this->url($action, $q), $dest, $this->headers(), 400 * 1048576, true);
     }
 
     /** Любой публичный файл по ссылке (Pexels CDN). */
@@ -44,7 +44,7 @@ final class RunnerClient
         $this->downloadTo($url, $dest, [], $maxBytes);
     }
 
-    private function downloadTo(string $url, string $dest, array $headers, int $maxBytes = 400 * 1048576): void
+    private function downloadTo(string $url, string $dest, array $headers, int $maxBytes = 400 * 1048576, bool $ownHost = false): void
     {
         if (!preg_match('~^https?://~i', $url)) {
             throw new \RuntimeException('Недопустимая ссылка: ' . $url);
@@ -59,6 +59,11 @@ final class RunnerClient
                 CURLOPT_NOPROGRESS => false,
                 CURLOPT_PROGRESSFUNCTION => static fn($ch, $dt, $dl) => $dl > $maxBytes ? 1 : 0,
             ]);
+            if ($ownHost && getenv('SHORTS_INSECURE_TLS') === '1') {
+                // только для вашего хостинга (самоподписанный сертификат); сайты Pixabay/Pexels проверяются как обычно
+                curl_setopt($ch, CURLOPT_SSL_VERIFYPEER, false);
+                curl_setopt($ch, CURLOPT_SSL_VERIFYHOST, 0);
+            }
             $ok = curl_exec($ch);
             $status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
             $err = curl_error($ch);
